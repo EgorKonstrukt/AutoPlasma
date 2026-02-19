@@ -97,6 +97,61 @@ def get_db():
         db.close()
 
 
+class StockOperation(BaseModel):
+    powder_name: str
+    quantity_change: float
+    operator: str
+    comment: str = ""
+
+
+@app.post("/inventory/adjust/", response_model=dict)
+def adjust_stock(op: StockOperation, db: Session = Depends(get_db)):
+    powder = db.query(DBPowder).filter(DBPowder.name == op.powder_name).first()
+    if not powder:
+        raise HTTPException(status_code=404, detail="Powder not found")
+
+    inv = db.query(DBInventory).filter(DBInventory.powder_id == powder.id).first()
+    if not inv:
+        # Создаем запись инвентаря если нет
+        inv = DBInventory(powder_id=powder.id, quantity_grams=0.0)
+        db.add(inv)
+
+    new_quantity = inv.quantity_grams + op.quantity_change
+    if new_quantity < 0:
+        raise HTTPException(status_code=400, detail="Resulting stock cannot be negative")
+
+    inv.quantity_grams = new_quantity
+
+    # Запись в лог
+    log_entry = DBUsageLog(
+        powder_id=powder.id,
+        consumed_grams=-op.quantity_change,
+        duration_sec=0.0,
+        operator=op.operator
+    )
+
+    db.add(log_entry)
+    db.commit()
+    db.refresh(inv)
+
+    return {"status": "success", "new_quantity": inv.quantity_grams, "powder_name": op.powder_name}
+
+
+@app.delete("/powders/{name}")
+def delete_powder(name: str, db: Session = Depends(get_db)):
+    powder = db.query(DBPowder).filter(DBPowder.name == name).first()
+    if not powder:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    inv = db.query(DBInventory).filter(DBInventory.powder_id == powder.id).first()
+    # if inv and inv.quantity_grams > 0:
+    #     raise HTTPException(status_code=400, detail="Cannot delete: Stock is not zero")
+
+    db.delete(powder)
+    if inv: db.delete(inv)
+    db.commit()
+    return {"status": "deleted"}
+
 @app.post("/powders/", response_model=PowderSchema)
 def create_powder(powder: PowderSchema, db: Session = Depends(get_db)):
     db_item = DBPowder(**powder.dict())

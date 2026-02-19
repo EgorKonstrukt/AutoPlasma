@@ -418,6 +418,7 @@ if __name__ == "__main__":
     sys.excepthook = handle_exception
 
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     win = PlasmaClientUI()
     win.show()
     sys.exit(app.exec())
