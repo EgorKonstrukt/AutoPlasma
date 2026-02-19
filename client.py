@@ -1,24 +1,80 @@
 import sys
+import os
+import json
 import requests
 import time
-from dataclasses import dataclass
-from typing import Optional, List, Deque
+import logging
+from dataclasses import dataclass, asdict
+from typing import Optional, List, Deque, Any
 from collections import deque
+from datetime import datetime
+from pathlib import Path
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidget, QTableWidgetItem, QPushButton, QLabel, QLineEdit,
                              QMessageBox, QHeaderView, QGroupBox, QFormLayout, QInputDialog,
-                             QDialog, QFrame, QScrollArea, QTabWidget, QGridLayout)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QElapsedTimer
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen
+                             QDialog, QFrame, QScrollArea, QTabWidget, QGridLayout,
+                             QMenuBar, QMenu, QStatusBar, QFileDialog, QSpinBox,
+                             QDoubleSpinBox, QCheckBox, QDialogButtonBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QElapsedTimer, QSettings, QSize, QPoint
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QIcon, QKeySequence, QActionGroup, QAction
+
 import pyqtgraph as pg
+
+# --- Конфигурация и Логирование ---
+CONFIG_FILE = "client_config.json"
+LOG_FILE = "client.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("AutoPlasmaClient")
+
+
+@dataclass
+class ClientConfig:
+    operator_name: str = "Operator"
+    theme: str = "Dark"
+    window_geometry: Optional[List[int]] = None
+    auto_save_logs: bool = True
+    graph_history_size: int = 200
+    api_url: str = "http://127.0.0.1:8000"
+
+    @staticmethod
+    def load() -> 'ClientConfig':
+        if not os.path.exists(CONFIG_FILE):
+            logger.info("Config file not found. Creating default.")
+            return ClientConfig()
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                # Merge with defaults to handle new fields in future versions
+                return ClientConfig(**{k: v for k, v in data.items() if k in ClientConfig.__annotations__})
+        except Exception as e:
+            logger.error(f"Failed to load config: {e}")
+            return ClientConfig()
+
+    def save(self):
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(asdict(self), f, indent=4)
+            logger.info("Configuration saved.")
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+
 
 STYLESHEET = """
 QPushButton:hover { background-color: #465f75; }
 QPushButton:pressed { background-color: #2c3e50; }
 QPushButton:disabled { background-color: #2c3e50; color: #7f8c8d; }
-QPushButton#btnStart { background-color: #27ae60; }
+QPushButton#btnStart { background-color: #27ae60; font-weight: bold; }
 QPushButton#btnStart:hover { background-color: #2ecc71; }
-QPushButton#btnStop { background-color: #c0392b; }
+QPushButton#btnStop { background-color: #c0392b; font-weight: bold; }
 QPushButton#btnStop:hover { background-color: #e74c3c; }
 QPushButton#btnStats { background-color: #2980b9; }
 QLabel { color: #ecf0f1; }
@@ -27,9 +83,63 @@ QLabel#statusOk { color: #2ecc71; font-weight: bold; }
 QLabel#statusLow { color: #e74c3c; font-weight: bold; }
 """
 
-API_URL = "http://127.0.0.1:8000"
+
+# --- Сетевой менеджер ---
+class NetworkManager:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+
+    def get_powders(self) -> List['PowderData']:
+        try:
+            resp = requests.get(f"{self.base_url}/powders/", timeout=5)
+            resp.raise_for_status()
+            return [PowderData(**item) for item in resp.json()]
+        except Exception as e:
+            logger.error(f"Network error (get_powders): {e}")
+            return []
+
+    def get_stock(self) -> List['StockData']:
+        try:
+            resp = requests.get(f"{self.base_url}/inventory/", timeout=5)
+            resp.raise_for_status()
+            return [StockData(**item) for item in resp.json()]
+        except Exception as e:
+            logger.error(f"Network error (get_stock): {e}")
+            return []
+
+    def get_logs(self, limit=50):
+        try:
+            resp = requests.get(f"{self.base_url}/logs/", params={"limit": limit}, timeout=5)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error(f"Network error (get_logs): {e}")
+            return []
+
+    def log_usage(self, name: str, grams: float, duration: float, op: str) -> bool:
+        try:
+            resp = requests.post(f"{self.base_url}/log_usage/",
+                                 json={"powder_name": name, "consumed_grams": grams, "duration_sec": duration,
+                                       "operator": op}, timeout=5)
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Network error (log_usage): {e}")
+            return False
+
+    def add_powder(self, name: str, density: float, factor: float, gpm: float) -> bool:
+        try:
+            resp = requests.post(f"{self.base_url}/powders/",
+                                 json={"name": name, "density": density, "flow_factor": factor, "target_gpm": gpm},
+                                 timeout=5)
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Network error (add_powder): {e}")
+            return False
 
 
+# --- Модели данных ---
 @dataclass
 class PowderData:
     id: int
@@ -47,52 +157,7 @@ class StockData:
     quantity_grams: float
 
 
-class NetworkManager:
-    @staticmethod
-    def get_powders() -> List[PowderData]:
-        try:
-            resp = requests.get(f"{API_URL}/powders/", timeout=5)
-            return [PowderData(**item) for item in resp.json()]
-        except:
-            return []
-
-    @staticmethod
-    def get_stock() -> List[StockData]:
-        try:
-            resp = requests.get(f"{API_URL}/inventory/", timeout=5)
-            return [StockData(**item) for item in resp.json()]
-        except:
-            return []
-
-    @staticmethod
-    def get_logs(limit=50):
-        try:
-            resp = requests.get(f"{API_URL}/logs/", params={"limit": limit}, timeout=5)
-            return resp.json()
-        except:
-            return []
-
-    @staticmethod
-    def log_usage(name: str, grams: float, duration: float, op: str) -> bool:
-        try:
-            resp = requests.post(f"{API_URL}/log_usage/",
-                                 json={"powder_name": name, "consumed_grams": grams, "duration_sec": duration,
-                                       "operator": op}, timeout=5)
-            return resp.status_code == 200
-        except:
-            return False
-
-    @staticmethod
-    def add_powder(name: str, density: float, factor: float, gpm: float) -> bool:
-        try:
-            resp = requests.post(f"{API_URL}/powders/",
-                                 json={"name": name, "density": density, "flow_factor": factor, "target_gpm": gpm},
-                                 timeout=5)
-            return resp.status_code == 200
-        except:
-            return False
-
-
+# --- Потоки и Виджеты ---
 class HardwareSimulator(QThread):
     status_signal = pyqtSignal(dict)
     finished_signal = pyqtSignal(float)
@@ -110,27 +175,28 @@ class HardwareSimulator(QThread):
         self._current_time = 0.0
         self._timer.start()
         self.start()
+        logger.info(f"Hardware simulation started at {rpm} RPM")
 
     def stop_dosage(self):
         self.running = False
         self.wait(1000)
-        if self.isRunning(): self.terminate()
+        if self.isRunning():
+            self.terminate()
         self.finished_signal.emit(self._current_time)
+        logger.info("Hardware simulation stopped")
 
     def run(self):
         while self.running:
             self._current_time = self._timer.elapsed() / 1000.0
-            # Эмуляция небольших колебаний RPM (шум ±0.5)
             noise = (hash(str(time.time())) % 100) / 100.0 - 0.5
             current_rpm = self.rpm + noise
 
-            data = {
+            self.status_signal.emit({
                 "time": self._current_time,
                 "rpm": current_rpm,
                 "status": "running"
-            }
-            self.status_signal.emit(data)
-            self.msleep(200)  # 5 обновлений в секунду
+            })
+            self.msleep(200)
 
         self.status_signal.emit({"time": self._current_time, "rpm": 0, "status": "stopped"})
 
@@ -150,7 +216,6 @@ class CircularProgress(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         rect = self.rect().adjusted(10, 10, -10, -10)
         center = rect.center()
         radius = min(rect.width(), rect.height()) / 2
@@ -169,9 +234,51 @@ class CircularProgress(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(self.value * 100)}%")
 
 
-class StatsDialog(QDialog):
-    def __init__(self, parent=None):
+class SettingsDialog(QDialog):
+    def __init__(self, config: ClientConfig, parent=None):
         super().__init__(parent)
+        self.config = config
+        self.setWindowTitle("Application Settings")
+        self.setStyleSheet(STYLESHEET)
+        self.setModal(True)
+        self.setGeometry(100, 100, 400, 300)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+
+        self.op_input = QLineEdit(self.config.operator_name)
+        self.op_input.setPlaceholderText("Enter default operator name")
+        form.addRow("Default Operator:", self.op_input)
+
+        self.api_input = QLineEdit(self.config.api_url)
+        form.addRow("API URL:", self.api_input)
+
+        self.graph_size = QSpinBox()
+        self.graph_size.setRange(50, 1000)
+        self.graph_size.setValue(self.config.graph_history_size)
+        form.addRow("Graph History Points:", self.graph_size)
+
+        layout.addLayout(form)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btn_box.accepted.connect(self.save_settings)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def save_settings(self):
+        self.config.operator_name = self.op_input.text().strip() or "Operator"
+        self.config.api_url = self.api_input.text().strip() or "http://127.0.0.1:8000"
+        self.config.graph_history_size = self.graph_size.value()
+        self.config.save()
+        logger.info("Settings updated by user")
+        self.accept()
+
+
+class StatsDialog(QDialog):
+    def __init__(self, net_manager: NetworkManager, parent=None):
+        super().__init__(parent)
+        self.net = net_manager
         self.setWindowTitle("Production Statistics")
         self.setStyleSheet(STYLESHEET)
         self.setGeometry(100, 100, 900, 600)
@@ -192,7 +299,6 @@ class StatsDialog(QDialog):
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["Powder", "Stock (g)", "Status"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        table.setStyleSheet("background-color: #2c3e50; color: white;")
         self.stock_table_ref = table
         return table
 
@@ -201,12 +307,11 @@ class StatsDialog(QDialog):
         table.setColumnCount(5)
         table.setHorizontalHeaderLabels(["Time", "Powder", "Used (g)", "Duration", "Operator"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        table.setStyleSheet("background-color: #2c3e50; color: white;")
         self.log_table_ref = table
         return table
 
     def refresh_data(self):
-        stock = NetworkManager.get_stock()
+        stock = self.net.get_stock()
         t = self.stock_table_ref
         t.setRowCount(len(stock))
         for i, s in enumerate(stock):
@@ -217,14 +322,12 @@ class StatsDialog(QDialog):
             item.setForeground(QColor("#2ecc71" if s.quantity_grams > 500 else "#e74c3c"))
             t.setItem(i, 2, item)
 
-        logs = NetworkManager.get_logs()
+        logs = self.net.get_logs()
         t = self.log_table_ref
         t.setRowCount(len(logs))
         for i, l in enumerate(logs):
             t.setItem(i, 0, QTableWidgetItem(l['timestamp'][:19]))
             t.setItem(i, 1, QTableWidgetItem(l['powder_name']))
-            # Логика отображения: приход (+), расход (-)
-            # В БД расход хранится как положительное consumed_grams
             change = -l['consumed_grams']
             item_val = QTableWidgetItem(f"{change:.2f}")
             item_val.setForeground(QColor("#2ecc71" if change > 0 else "#e74c3c"))
@@ -236,9 +339,17 @@ class StatsDialog(QDialog):
 class PlasmaClientEnhanced(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AutoPlasma Client")
+        self.config = ClientConfig.load()
+        self.net = NetworkManager(self.config.api_url)
+
+        self.setWindowTitle(f"AutoPlasma Client - Operator: {self.config.operator_name}")
         self.setStyleSheet(STYLESHEET)
-        self.setGeometry(100, 100, 1200, 800)
+
+        # Restore geometry
+        if self.config.window_geometry:
+            self.setGeometry(*self.config.window_geometry)
+        else:
+            self.setGeometry(100, 100, 1200, 800)
 
         self.hw = HardwareSimulator()
         self.hw.status_signal.connect(self.update_live_data)
@@ -247,8 +358,8 @@ class PlasmaClientEnhanced(QMainWindow):
         self.selected_powder: Optional[PowderData] = None
         self.current_rpm = 0.0
 
-        self.data_buffer_x: Deque[float] = deque(maxlen=200)
-        self.data_buffer_y: Deque[float] = deque(maxlen=200)
+        self.data_buffer_x: Deque[float] = deque(maxlen=self.config.graph_history_size)
+        self.data_buffer_y: Deque[float] = deque(maxlen=self.config.graph_history_size)
 
         self.init_ui()
         self.refresh_powder_list()
@@ -257,7 +368,11 @@ class PlasmaClientEnhanced(QMainWindow):
         self.timer.timeout.connect(self.background_update)
         self.timer.start(5000)
 
+        logger.info("Client initialized successfully")
+
     def init_ui(self):
+        self._create_menu_bar()
+
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
@@ -314,7 +429,6 @@ class PlasmaClientEnhanced(QMainWindow):
         self.plot_widget.setXRange(0, 60)
 
         self.curve = self.plot_widget.plot(pen=pg.mkPen('#f1c40f', width=2))
-
         center_layout.addWidget(self.plot_widget)
 
         ctrl_layout = QHBoxLayout()
@@ -348,15 +462,19 @@ class PlasmaClientEnhanced(QMainWindow):
         self.lbl_sel_info.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         self.lbl_stock_info = QLabel("Stock: --")
         self.lbl_stock_info.setFont(QFont("Arial", 10))
+
         self.lbl_sys_log = QLabel("System Ready")
-        self.lbl_sys_log.setStyleSheet("color: #95a5a6; border: 1px solid #34495e; padding: 10px; border-radius: 4px;")
+        self.lbl_sys_log.setStyleSheet(
+            "color: #95a5a6; border: 1px solid #34495e; padding: 10px; border-radius: 4px; background-color: #22303d;")
         self.lbl_sys_log.setWordWrap(True)
+        self.lbl_sys_log.setMinimumHeight(100)
 
         form = QFormLayout()
         form.addRow("Selection:", self.lbl_sel_info)
         form.addRow("Availability:", self.lbl_stock_info)
 
         right_layout.addLayout(form)
+        right_layout.addWidget(QLabel("System Log:"))
         right_layout.addWidget(self.lbl_sys_log)
         right_layout.addStretch()
 
@@ -364,8 +482,61 @@ class PlasmaClientEnhanced(QMainWindow):
         main_layout.addWidget(center_panel, 2)
         main_layout.addWidget(right_panel, 1)
 
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+        self.statusBar.showMessage(f"Connected to: {self.config.api_url} | Operator: {self.config.operator_name}")
+
+    def _create_menu_bar(self):
+        menubar = self.menuBar()
+
+        file_menu = menubar.addMenu("File")
+
+        act_settings = QAction("Settings...", self)
+        act_settings.setShortcut(QKeySequence.StandardKey.Preferences)
+        act_settings.triggered.connect(self.open_settings)
+        file_menu.addAction(act_settings)
+
+        file_menu.addSeparator()
+
+        act_exit = QAction("Exit", self)
+        act_exit.setShortcut(QKeySequence.StandardKey.Quit)
+        act_exit.triggered.connect(self.close)
+        file_menu.addAction(act_exit)
+
+        help_menu = menubar.addMenu("Help")
+        act_about = QAction("About", self)
+        act_about.triggered.connect(self.show_about)
+        help_menu.addAction(act_about)
+
+    def open_settings(self):
+        dlg = SettingsDialog(self.config, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            # Apply changes
+            self.net.base_url = self.config.api_url
+            self.setWindowTitle(f"AutoPlasma Client - Operator: {self.config.operator_name}")
+            self.statusBar.showMessage(f"Connected to: {self.config.api_url} | Operator: {self.config.operator_name}")
+
+            # Update graph buffer size
+            max_len = self.config.graph_history_size
+            self.data_buffer_x = deque(self.data_buffer_x, maxlen=max_len)
+            self.data_buffer_y = deque(self.data_buffer_y, maxlen=max_len)
+
+            logger.info("Settings applied dynamically")
+
+    def show_about(self):
+        QMessageBox.about(self, "About AutoPlasma",
+                          "")
+
+    def closeEvent(self, event):
+        # Save window geometry
+        self.config.window_geometry = [self.x(), self.y(), self.width(), self.height()]
+        self.config.save()
+        logger.info("Application closed, geometry saved")
+        self.hw.stop_dosage()
+        event.accept()
+
     def refresh_powder_list(self):
-        data = NetworkManager.get_powders()
+        data = self.net.get_powders()
         self.table.setRowCount(len(data))
         for i, p in enumerate(data):
             self.table.setItem(i, 0, QTableWidgetItem(str(p.id)))
@@ -378,7 +549,7 @@ class PlasmaClientEnhanced(QMainWindow):
         items = self.table.selectedItems()
         if not items: return
         name = self.table.item(items[0].row(), 1).text()
-        powders = NetworkManager.get_powders()
+        powders = self.net.get_powders()
         self.selected_powder = next((p for p in powders if p.name == name), None)
 
         if self.selected_powder:
@@ -386,10 +557,11 @@ class PlasmaClientEnhanced(QMainWindow):
             self.check_stock_status()
             self.btn_calc.setEnabled(True)
             self.reset_visuals()
+            logger.debug(f"Selected powder: {self.selected_powder.name}")
 
     def check_stock_status(self):
         if not self.selected_powder: return
-        stock = NetworkManager.get_stock()
+        stock = self.net.get_stock()
         current = next((s.quantity_grams for s in stock if s.powder_name == self.selected_powder.name), 0)
 
         self.lbl_stock_info.setText(f"Stock: {current:.1f} g")
@@ -400,31 +572,32 @@ class PlasmaClientEnhanced(QMainWindow):
 
     def calculate_params(self):
         if not self.selected_powder: return
-        rpm = round(((
-                                 self.selected_powder.target_gpm / self.selected_powder.density) / 10.0) * 2.5 * self.selected_powder.flow_factor * 60,
-                    2)
+        rpm = round(((self.selected_powder.target_gpm / self.selected_powder.density) / 10.0) *
+                    2.5 * self.selected_powder.flow_factor * 60, 2)
         self.current_rpm = rpm
-        self.lbl_sys_log.setText(f"Parameters calculated: {rpm} RPM")
+        msg = f"Parameters calculated: {rpm} RPM"
+        self.lbl_sys_log.setText(msg)
+        self.statusBar.showMessage(msg, 5000)
         self.btn_start.setEnabled(True)
         self.reset_visuals()
-
-        max_expected = rpm * 1.2
-        # self.plot_widget.setYRange(0, max(10, max_expected))
+        logger.info(f"Calculated RPM: {rpm} for {self.selected_powder.name}")
 
     def start_process(self):
         if not self.selected_powder or self.current_rpm == 0: return
 
-        stock = NetworkManager.get_stock()
+        stock = self.net.get_stock()
         current = next((s.quantity_grams for s in stock if s.powder_name == self.selected_powder.name), 0)
         if current < 50:
-            if QMessageBox.warning(self, "Critical Low Stock", "Stock critically low. Start anyway?",
+            if QMessageBox.warning(self, "Critical Low Stock", "Stock critically low (<50g). Start anyway?",
                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                 return
 
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_calc.setEnabled(False)
-        self.lbl_sys_log.setText("Process STARTED.")
+        msg = "Process STARTED."
+        self.lbl_sys_log.setText(msg)
+        self.statusBar.showMessage(msg)
         self.progress_ring.set_value(0.8, "#2ecc71")
 
         self.data_buffer_x.clear()
@@ -445,30 +618,39 @@ class PlasmaClientEnhanced(QMainWindow):
         self.progress_ring.set_value(0.0, "#7f8c8d")
 
         if duration < 1.0:
-            self.lbl_sys_log.setText("Stopped (too short).")
+            msg = "Stopped (too short, <1s). Not logged."
+            self.lbl_sys_log.setText(msg)
+            self.statusBar.showMessage(msg)
             return
 
         used = (self.selected_powder.target_gpm / 60.0) * duration
 
         op, ok = QInputDialog.getText(self, "Complete Process",
-                                      f"Duration: {duration:.1f}s\nUsed: {used:.2f}g\n\nOperator Name:")
-        if ok and op:
-            if NetworkManager.log_usage(self.selected_powder.name, used, duration, op):
-                self.lbl_sys_log.setText(f"Success! Logged {used:.2f}g.")
-                self.check_stock_status()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save log.")
+                                      f"Duration: {duration:.1f}s\nUsed: {used:.2f}g\n\nOperator Name:",
+                                      text=self.config.operator_name)  # <-- Ключевое изменение
 
-    def update_live_data(self, dict):
-        self.lbl_rpm_val.setText(f"{dict['rpm']:.1f}")
-        self.lbl_time_val.setText(f"{dict['time']:.1f}s")
+        if ok and op:
+            if self.net.log_usage(self.selected_powder.name, used, duration, op):
+                msg = f"Success! Logged {used:.2f}g by {op}."
+                self.lbl_sys_log.setText(msg)
+                self.statusBar.showMessage(msg)
+                self.check_stock_status()
+                logger.info(f"Usage logged: {used}g of {self.selected_powder.name} by {op}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save log to server.")
+        else:
+            logger.warning("User cancelled logging dialog")
+
+    def update_live_data(self, data: dict):
+        self.lbl_rpm_val.setText(f"{data['rpm']:.1f}")
+        self.lbl_time_val.setText(f"{data['time']:.1f}s")
 
         if self.selected_powder:
-            mass = (self.selected_powder.target_gpm / 60.0) * dict['time']
+            mass = (self.selected_powder.target_gpm / 60.0) * data['time']
             self.lbl_mass_val.setText(f"{mass:.2f}g")
 
-        self.data_buffer_x.append(dict['time'])
-        self.data_buffer_y.append(dict['rpm'])
+        self.data_buffer_x.append(data['time'])
+        self.data_buffer_y.append(data['rpm'])
 
         x_list = list(self.data_buffer_x)
         y_list = list(self.data_buffer_y)
@@ -483,12 +665,6 @@ class PlasmaClientEnhanced(QMainWindow):
             else:
                 self.plot_widget.setXRange(0, max(60, current_max_x + 5), padding=0.05)
 
-            # view_range = self.plot_widget.getViewBox().state['viewRange']
-            # y_min, y_max = view_range[1]
-            # if dict['rpm'] > y_max * 0.9 or dict['rpm'] < y_min:
-            #     new_max = max(dict['rpm'] * 1.2, 10)
-            #     self.plot_widget.setYRange(0, new_max, padding=0.1)
-
     def reset_visuals(self):
         self.lbl_rpm_val.setText("0.0")
         self.lbl_time_val.setText("0.0s")
@@ -501,16 +677,16 @@ class PlasmaClientEnhanced(QMainWindow):
 
     def background_update(self):
         self.check_stock_status()
-        self.refresh_powder_list()
+        # Не обновляем весь список порошков постоянно, чтобы не мерцало, только если нужно
+        # self.refresh_powder_list()
 
     def show_stats(self):
-        dlg = StatsDialog(self)
+        dlg = StatsDialog(self.net, self)
         dlg.exec()
-        dlg.refresh_data()
 
     def add_material_dialog(self):
         name, ok = QInputDialog.getText(self, "Add Material", "Name:")
-        if not ok: return
+        if not ok or not name: return
         d, ok = QInputDialog.getDouble(self, "Add", "Density:", 1.0)
         if not ok: return
         f, ok = QInputDialog.getDouble(self, "Add", "Flow Factor:", 1.0)
@@ -518,16 +694,21 @@ class PlasmaClientEnhanced(QMainWindow):
         g, ok = QInputDialog.getDouble(self, "Add", "Target GPM:", 10.0)
         if not ok: return
 
-        if NetworkManager.add_powder(name, d, f, g):
+        if self.net.add_powder(name, d, f, g):
             QMessageBox.information(self, "Success", "Material added.")
             self.refresh_powder_list()
+            logger.info(f"New material added: {name}")
         else:
-            QMessageBox.critical(self, "Error", "Failed to add.")
+            QMessageBox.critical(self, "Error", "Failed to add material.")
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Глобальная настройка шрифтов для лучшего вида
+    font = QFont("Segoe UI", 10)
+    app.setFont(font)
+
     window = PlasmaClientEnhanced()
     window.show()
     sys.exit(app.exec())
