@@ -125,25 +125,25 @@ class OperationDialog(QDialog):
 
         if mode == 'add':
             self.name_input.setText("")
-            form.addRow("Name:", self.name_input)
-            form.addRow("Density:", self.dens_input)
-            form.addRow("Flow Factor:", self.factor_input)
-            form.addRow("Target GPM:", self.gpm_input)
+            form.addRow("Название:", self.name_input)
+            form.addRow("Плотность:", self.dens_input)
+            form.addRow("Коэффициент подачи:", self.factor_input)
+            form.addRow("Целевое GPM:", self.gpm_input)
         else:
-            lbl_info = QLabel(f"Powder: {powder_name}\nCurrent Stock: {current_stock:.2f} g")
+            lbl_info = QLabel(f"Порошок: {powder_name}\nТекущий ассортимент: {current_stock:.2f} г")
             lbl_info.setStyleSheet("font-weight: bold; color: #2c3e50;")
             form.addRow(lbl_info)
 
             self.op_input = QComboBox()
-            self.op_input.addItems(["Admin", "Storekeeper", "Technologist"])
-            form.addRow("Operator:", self.op_input)
+            self.op_input.addItems(["Администратор", "Кладовщик", "Технолог"])
+            form.addRow("Оператор:", self.op_input)
 
-            self.amount_input.setPlaceholderText("Enter amount (g)")
-            form.addRow("Amount (g):", self.amount_input)
+            self.amount_input.setPlaceholderText("Введите количество (г)")
+            form.addRow("Количество (г):", self.amount_input)
 
             if mode == 'adjust':
-                self.comment_input.setPlaceholderText("Reason for adjustment")
-                form.addRow("Comment:", self.comment_input)
+                self.comment_input.setPlaceholderText("Причина корректировки")
+                form.addRow("Комментарий:", self.comment_input)
 
         layout.addLayout(form)
 
@@ -182,7 +182,7 @@ class OperationDialog(QDialog):
 class AdminPanel(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Database & Inventory Management")
+        self.setWindowTitle("Управление базой данных и складскими запасами")
         self.setGeometry(150, 150, 1100, 700)
 
         central = QWidget()
@@ -190,9 +190,9 @@ class AdminPanel(QMainWindow):
         main_layout = QVBoxLayout(central)
 
         tabs = QTabWidget()
-        tabs.addTab(self.create_inventory_tab(), "Inventory & Stock")
-        tabs.addTab(self.create_logs_tab(), "Transaction History")
-        tabs.addTab(self.create_settings_tab(), "Powder Settings")
+        tabs.addTab(self.create_inventory_tab(), "Инвентаризация и складские запасы")
+        tabs.addTab(self.create_logs_tab(), "История транзакций")
+        tabs.addTab(self.create_settings_tab(), "Настройки порошка")
 
         main_layout.addWidget(tabs)
 
@@ -208,14 +208,14 @@ class AdminPanel(QMainWindow):
 
         self.stock_table = QTableWidget()
         self.stock_table.setColumnCount(4)
-        self.stock_table.setHorizontalHeaderLabels(["Powder Name", "Current Stock (g)", "Status", "Actions"])
+        self.stock_table.setHorizontalHeaderLabels(["Порошок", "Количество (г)", "Статус", "Действия"])
         self.stock_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.stock_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.stock_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.stock_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
 
         toolbar = QHBoxLayout()
-        btn_refresh = QPushButton("Refresh")
+        btn_refresh = QPushButton("Обновить")
         btn_refresh.clicked.connect(self.refresh_all)
         toolbar.addWidget(btn_refresh)
         toolbar.addStretch()
@@ -230,7 +230,7 @@ class AdminPanel(QMainWindow):
 
         self.log_table = QTableWidget()
         self.log_table.setColumnCount(5)
-        self.log_table.setHorizontalHeaderLabels(["Timestamp", "Powder", "Change (g)", "Operator", "Type"])
+        self.log_table.setHorizontalHeaderLabels(["Отметка времени", "Порошок", "Изменение (г)", "Оператор", "Тип"])
         self.log_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         layout.addWidget(self.log_table)
@@ -242,11 +242,11 @@ class AdminPanel(QMainWindow):
 
         self.settings_table = QTableWidget()
         self.settings_table.setColumnCount(6)
-        self.settings_table.setHorizontalHeaderLabels(["ID", "Name", "Density", "Factor", "Target GPM", "Actions"])
+        self.settings_table.setHorizontalHeaderLabels(["ID", "Название", "Плотность", "Коэффициент", "Целевое GPM", "Действие"])
         self.settings_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         toolbar = QHBoxLayout()
-        btn_add = QPushButton("Add New Powder")
+        btn_add = QPushButton("Добавить новый материал")
         btn_add.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 8px;")
         btn_add.clicked.connect(self.open_add_dialog)
         toolbar.addWidget(btn_add)
@@ -270,11 +270,11 @@ class AdminPanel(QMainWindow):
 
             status_item = QTableWidgetItem("OK")
             if s.quantity_grams < 500:
-                status_item.setText("LOW")
+                status_item.setText("МАЛО")
                 status_item.setForeground(QColor("red"))
                 status_item.setBackground(QColor("#ffcccc"))
             elif s.quantity_grams < 1000:
-                status_item.setText("Medium")
+                status_item.setText("Средне")
                 status_item.setForeground(QColor("orange"))
             self.stock_table.setItem(i, 2, status_item)
 
@@ -284,14 +284,14 @@ class AdminPanel(QMainWindow):
             act_layout.setContentsMargins(0, 0, 0, 0)
 
             btn_restock = QPushButton("+")
-            btn_restock.setToolTip("Restock")
+            btn_restock.setToolTip("Пополнение запасов")
             btn_restock.setFixedSize(30, 30)
             btn_restock.clicked.connect(
                 lambda checked, name=s.powder_name, qty=s.quantity_grams: self.open_operation_dialog('restock', name,
                                                                                                      qty))
 
             btn_adjust = QPushButton("±")
-            btn_adjust.setToolTip("Adjust")
+            btn_adjust.setToolTip("Регулировать")
             btn_adjust.setFixedSize(30, 30)
             btn_adjust.clicked.connect(
                 lambda checked, name=s.powder_name, qty=s.quantity_grams: self.open_operation_dialog('adjust', name,
@@ -318,7 +318,7 @@ class AdminPanel(QMainWindow):
 
             self.log_table.setItem(i, 3, QTableWidgetItem(l.operator))
 
-            type_text = "Restock" if l.change > 0 else "Consumption" if l.change < 0 else "Correction"
+            type_text = "Пополнение запасов" if l.change > 0 else "Потребление" if l.change < 0 else "Корректировка"
             self.log_table.setItem(i, 4, QTableWidgetItem(type_text))
 
     def refresh_settings(self):
@@ -331,7 +331,7 @@ class AdminPanel(QMainWindow):
             self.settings_table.setItem(i, 3, QTableWidgetItem(f"{p.flow_factor:.2f}"))
             self.settings_table.setItem(i, 4, QTableWidgetItem(f"{p.target_gpm:.1f}"))
 
-            btn_del = QPushButton("Delete")
+            btn_del = QPushButton("Удалить")
             btn_del.setStyleSheet("background-color: #c0392b; color: white;")
             btn_del.setFixedSize(60, 25)
             btn_del.clicked.connect(lambda checked, name=p.name: self.delete_powder(name))
@@ -342,45 +342,45 @@ class AdminPanel(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             if not data:
-                QMessageBox.critical(self, "Error", "Invalid input data")
+                QMessageBox.critical(self, "Ошибка", "Неверные входные данные")
                 return
 
             if mode == 'restock':
-                ok = AdminNetwork.adjust_stock(name, data['amount'], data['operator'], "Restock")
-                msg = f"Added {data['amount']}g to {name}"
+                ok = AdminNetwork.adjust_stock(name, data['amount'], data['operator'], "Пополнение запасов")
+                msg = f"Добавлено {data['amount']}г в {name}"
             elif mode == 'adjust':
                 ok = AdminNetwork.adjust_stock(name, data['amount'], data['operator'], data['comment'])
-                msg = f"Adjusted {name} by {data['amount']}g"
+                msg = f"Скорректировано {name} до {data['amount']}г"
 
             if ok:
-                QMessageBox.information(self, "Success", msg)
+                QMessageBox.information(self, "Успешно", msg)
                 self.refresh_all()
             else:
-                QMessageBox.critical(self, "Error", "Operation failed. Check server logs.")
+                QMessageBox.critical(self, "Ошибка", "Операция не удалась. Проверьте журналы сервера.")
 
     def open_add_dialog(self):
         dlg = OperationDialog(self, 'add')
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             if not data:
-                QMessageBox.critical(self, "Error", "Invalid numeric values")
+                QMessageBox.critical(self, "Ошибка", "Недопустимые числовые значения")
                 return
             if AdminNetwork.add_powder(data['name'], data['density'], data['factor'], data['gpm']):
-                QMessageBox.information(self, "Success", f"Powder {data['name']} added with 5kg default stock")
+                QMessageBox.information(self, "Успешно", f"Порошок {data['name']} добавлен с учетом стандартного запаса в 5 кг.")
                 self.refresh_all()
             else:
-                QMessageBox.critical(self, "Error", "Failed to add (Name might exist)")
+                QMessageBox.critical(self, "Ошибка", "Не удалось добавить (возможно, имя уже существует)")
 
     def delete_powder(self, name: str):
-        reply = QMessageBox.question(self, "Confirm Delete",
-                                     f"Are you sure you want to delete '{name}'?\nStock must be 0.",
+        reply = QMessageBox.question(self, "Подтвердить удаление",
+                                     f"Вы уверены, что хотите удалить? '{name}'?\nКоличество должно быть равно 0.",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             if AdminNetwork.delete_powder(name):
-                QMessageBox.information(self, "Success", "Powder deleted")
+                QMessageBox.information(self, "Успешно", "Порошок удален")
                 self.refresh_all()
             else:
-                QMessageBox.critical(self, "Error", "Cannot delete. Stock is not zero or server error.")
+                QMessageBox.critical(self, "Ошибка", "Удалить невозможно. Количество на складе не равно нулю или произошла ошибка сервера.")
 
 
 if __name__ == "__main__":

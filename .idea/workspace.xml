@@ -4,9 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="3b6d0f62-f743-43e7-9539-fd66bf997324" name="Changes" comment="client refactor">
+    <list default="true" id="3b6d0f62-f743-43e7-9539-fd66bf997324" name="Changes" comment="client russification">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/admin_panel.py" beforeDir="false" afterPath="$PROJECT_DIR$/admin_panel.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -59,7 +59,7 @@
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
 }</component>
-  <component name="RunManager" selected="Python.client">
+  <component name="RunManager" selected="Python.admin_panel">
     <configuration name="admin_panel" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="AutoPlasma" />
       <option name="ENV_FILES" value="" />
@@ -131,9 +131,9 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.client" />
-        <item itemvalue="Python.server" />
         <item itemvalue="Python.admin_panel" />
+        <item itemvalue="Python.server" />
+        <item itemvalue="Python.client" />
       </list>
     </recent_temporary>
   </component>
@@ -176,13 +176,22 @@
       <option name="project" value="LOCAL" />
       <updated>1771499681806</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="client russification">
+      <option name="closed" value="true" />
+      <created>1771580724157</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1771580724157</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="first commit" />
     <MESSAGE value="added admin panel" />
     <MESSAGE value="client refactor" />
-    <option name="LAST_COMMIT_MESSAGE" value="client refactor" />
+    <MESSAGE value="client russification" />
+    <option name="LAST_COMMIT_MESSAGE" value="client russification" />
   </component>
 </project>
