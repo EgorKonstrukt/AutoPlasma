@@ -10,16 +10,17 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidget, QTableWidgetItem, QPushButton, QLabel, QLineEdit,
                              QMessageBox, QHeaderView, QGroupBox, QFormLayout, QInputDialog,
                              QDialog, QFrame, QScrollArea, QTabWidget, QGridLayout,
                              QMenuBar, QMenu, QStatusBar, QFileDialog, QSpinBox,
-                             QDoubleSpinBox, QCheckBox, QDialogButtonBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QElapsedTimer, QSettings, QSize, QPoint
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QIcon, QKeySequence, QActionGroup, QAction
+                             QDoubleSpinBox, QCheckBox, QDialogButtonBox, QActionGroup, QAction)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QElapsedTimer, QSettings, QSize, QPoint
+from PyQt5.QtGui import QFont, QColor, QPainter, QPen, QIcon, QKeySequence
 
 import pyqtgraph as pg
+
 
 # --- Конфигурация и Логирование ---
 CONFIG_FILE = "client_config.json"
@@ -53,7 +54,6 @@ class ClientConfig:
         try:
             with open(CONFIG_FILE, 'r') as f:
                 data = json.load(f)
-                # Merge with defaults to handle new fields in future versions
                 return ClientConfig(**{k: v for k, v in data.items() if k in ClientConfig.__annotations__})
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
@@ -69,22 +69,10 @@ class ClientConfig:
 
 
 STYLESHEET = """
-QPushButton:hover { background-color: #465f75; }
-QPushButton:pressed { background-color: #2c3e50; }
-QPushButton:disabled { background-color: #2c3e50; color: #7f8c8d; }
-QPushButton#btnStart { background-color: #27ae60; font-weight: bold; }
-QPushButton#btnStart:hover { background-color: #2ecc71; }
-QPushButton#btnStop { background-color: #c0392b; font-weight: bold; }
-QPushButton#btnStop:hover { background-color: #e74c3c; }
-QPushButton#btnStats { background-color: #2980b9; }
-QLabel { color: #ecf0f1; }
-QLabel#bigValue { font-size: 24px; font-weight: bold; color: #f1c40f; }
-QLabel#statusOk { color: #2ecc71; font-weight: bold; }
-QLabel#statusLow { color: #e74c3c; font-weight: bold; }
+
 """
 
 
-# --- Сетевой менеджер ---
 class NetworkManager:
     def __init__(self, base_url: str):
         self.base_url = base_url
@@ -139,7 +127,6 @@ class NetworkManager:
             return False
 
 
-# --- Модели данных ---
 @dataclass
 class PowderData:
     id: int
@@ -157,7 +144,6 @@ class StockData:
     quantity_grams: float
 
 
-# --- Потоки и Виджеты ---
 class HardwareSimulator(QThread):
     status_signal = pyqtSignal(dict)
     finished_signal = pyqtSignal(float)
@@ -244,7 +230,6 @@ class SettingsDialog(QDialog):
         self.setGeometry(100, 100, 400, 300)
 
         layout = QVBoxLayout(self)
-
         form = QFormLayout()
 
         self.op_input = QLineEdit(self.config.operator_name)
@@ -305,11 +290,7 @@ class StatsDialog(QDialog):
     def create_log_widget(self):
         table = QTableWidget()
         table.setColumnCount(5)
-        table.setHorizontalHeaderLabels(["Время",
-                                         "Порошок",
-                                         "Использовано (г)",
-                                         "Продолжительность",
-                                         "Оператор"])
+        table.setHorizontalHeaderLabels(["Время", "Порошок", "Использовано (г)", "Продолжительность", "Оператор"])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.log_table_ref = table
         return table
@@ -349,7 +330,6 @@ class PlasmaClient(QMainWindow):
         self.setWindowTitle(f"AutoPlasma Клиент - Оператор: {self.config.operator_name}")
         self.setStyleSheet(STYLESHEET)
 
-        # Restore geometry
         if self.config.window_geometry:
             self.setGeometry(*self.config.window_geometry)
         else:
@@ -383,7 +363,6 @@ class PlasmaClient(QMainWindow):
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # Left Panel
         left_panel = QGroupBox("Выбор материала")
         left_layout = QVBoxLayout(left_panel)
 
@@ -399,7 +378,6 @@ class PlasmaClient(QMainWindow):
         btn_add.clicked.connect(self.add_material_dialog)
         left_layout.addWidget(btn_add)
 
-        # Center Panel
         center_panel = QGroupBox("Управление технологическим процессом")
         center_layout = QVBoxLayout(center_panel)
 
@@ -458,7 +436,6 @@ class PlasmaClient(QMainWindow):
         ctrl_layout.addWidget(self.btn_stats)
         center_layout.addLayout(ctrl_layout)
 
-        # Right Panel
         right_panel = QGroupBox("Состояние системы")
         right_layout = QVBoxLayout(right_panel)
 
@@ -484,7 +461,7 @@ class PlasmaClient(QMainWindow):
 
         main_layout.addWidget(left_panel, 4)
         main_layout.addWidget(center_panel, 2)
-        main_layout.addWidget(right_panel, 1)
+        main_layout.addWidget(right_panel, 3)
 
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
@@ -492,7 +469,6 @@ class PlasmaClient(QMainWindow):
 
     def _create_menu_bar(self):
         menubar = self.menuBar()
-
         file_menu = menubar.addMenu("Файл")
 
         act_settings = QAction("Настройки...", self)
@@ -515,12 +491,10 @@ class PlasmaClient(QMainWindow):
     def open_settings(self):
         dlg = SettingsDialog(self.config, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            # Apply changes
             self.net.base_url = self.config.api_url
             self.setWindowTitle(f"AutoPlasma Клиент - Оператор: {self.config.operator_name}")
             self.statusBar.showMessage(f"Подключено к: {self.config.api_url} | Оператор: {self.config.operator_name}")
 
-            # Update graph buffer size
             max_len = self.config.graph_history_size
             self.data_buffer_x = deque(self.data_buffer_x, maxlen=max_len)
             self.data_buffer_y = deque(self.data_buffer_y, maxlen=max_len)
@@ -528,11 +502,9 @@ class PlasmaClient(QMainWindow):
             logger.info("Настройки применены динамически.")
 
     def show_about(self):
-        QMessageBox.about(self, "О AutoPlasma",
-                          "ООО Плазмоавтоматика \n Copyright \n Егор Мамошкин")
+        QMessageBox.about(self, "О AutoPlasma", "ООО Плазмоавтоматика \n Copyright \n Егор Мамошкин")
 
     def closeEvent(self, event):
-        # Save window geometry
         self.config.window_geometry = [self.x(), self.y(), self.width(), self.height()]
         self.config.save()
         logger.info("Приложение закрыто, геометрия сохранена.")
@@ -681,8 +653,6 @@ class PlasmaClient(QMainWindow):
 
     def background_update(self):
         self.check_stock_status()
-        # Не обновляем весь список порошков постоянно, чтобы не мерцало, только если нужно
-        # self.refresh_powder_list()
 
     def show_stats(self):
         dlg = StatsDialog(self.net, self)

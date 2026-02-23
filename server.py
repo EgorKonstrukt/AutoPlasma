@@ -1,15 +1,56 @@
+import os
+import sys
+import logging
+import logging.config
+from datetime import datetime
+from typing import List, Optional
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
 import uvicorn
-import logging
 
-logging.basicConfig(level=logging.INFO)
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "%(levelprefix)s %(message)s",
+            "use_colors": True,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": '%(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+        },
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+        "access": {
+            "formatter": "access",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "root": {"level": "INFO", "handlers": ["default"]},
+    "loggers": {
+        "uvicorn": {"level": "INFO", "handlers": ["default"], "propagate": False},
+        "uvicorn.access": {"level": "INFO", "handlers": ["access"], "propagate": False},
+        "AutoPlasmaServer": {"level": "INFO", "handlers": ["default"], "propagate": False},
+    },
+}
+
+if sys.stdout is None: sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None: sys.stderr = open(os.devnull, 'w')
+
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("AutoPlasmaServer")
 
 DATABASE_URL = "sqlite:///./autoplasma.db"
@@ -24,8 +65,8 @@ class DBPowder(Base):
     density = Column(Float)
     flow_factor = Column(Float)
     target_gpm = Column(Float)
-    inventory = relationship("DBInventory", back_populates="powder", uselist=False)
-    logs = relationship("DBUsageLog", back_populates="powder")
+    inventory = relationship("DBInventory", back_populates="powder", uselist=False, cascade="all, delete-orphan")
+    logs = relationship("DBUsageLog", back_populates="powder", cascade="all, delete-orphan")
 
 class DBInventory(Base):
     __tablename__ = "inventory"
@@ -52,14 +93,14 @@ class PowderSchema(BaseModel):
     density: float
     flow_factor: float
     target_gpm: float
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class InventorySchema(BaseModel):
     id: int
     powder_id: int
     powder_name: str
     quantity_grams: float
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UsageLogSchema(BaseModel):
     id: int
@@ -68,7 +109,7 @@ class UsageLogSchema(BaseModel):
     consumed_grams: float
     operator: str
     duration_sec: float
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UsageRecord(BaseModel):
     powder_name: str
@@ -87,34 +128,22 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 def get_db():
     db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    try: yield db
+    finally: db.close()
 
 @app.post("/inventory/adjust/", response_model=dict)
 def adjust_stock(op: StockOperation, db: Session = Depends(get_db)):
     logger.info(f"Adjusting stock for {op.powder_name} by {op.quantity_change}")
     powder = db.query(DBPowder).filter(DBPowder.name == op.powder_name).first()
-    if not powder:
-        raise HTTPException(status_code=404, detail="Powder not found")
-
+    if not powder: raise HTTPException(status_code=404, detail="Powder not found")
     inv = db.query(DBInventory).filter(DBInventory.powder_id == powder.id).first()
     if not inv:
         inv = DBInventory(powder_id=powder.id, quantity_grams=0.0)
         db.add(inv)
-
     new_quantity = inv.quantity_grams + op.quantity_change
-    if new_quantity < 0:
-        raise HTTPException(status_code=400, detail="Resulting stock cannot be negative")
-
+    if new_quantity < 0: raise HTTPException(status_code=400, detail="Resulting stock cannot be negative")
     inv.quantity_grams = new_quantity
-    log_entry = DBUsageLog(
-        powder_id=powder.id,
-        consumed_grams=-op.quantity_change,
-        duration_sec=0.0,
-        operator=op.operator
-    )
+    log_entry = DBUsageLog(powder_id=powder.id, consumed_grams=-op.quantity_change, duration_sec=0.0, operator=op.operator)
     db.add(log_entry)
     db.commit()
     db.refresh(inv)
@@ -123,18 +152,18 @@ def adjust_stock(op: StockOperation, db: Session = Depends(get_db)):
 @app.delete("/powders/{name}")
 def delete_powder(name: str, db: Session = Depends(get_db)):
     powder = db.query(DBPowder).filter(DBPowder.name == name).first()
-    if not powder:
-        raise HTTPException(status_code=404, detail="Not found")
+    if not powder: raise HTTPException(status_code=404, detail="Not found")
     inv = db.query(DBInventory).filter(DBInventory.powder_id == powder.id).first()
-    db.delete(powder)
     if inv: db.delete(inv)
+    db.delete(powder)
     db.commit()
     logger.info(f"Deleted powder: {name}")
     return {"status": "deleted"}
 
 @app.post("/powders/", response_model=PowderSchema)
 def create_powder(powder: PowderSchema, db: Session = Depends(get_db)):
-    db_item = DBPowder(**powder.dict())
+    data = powder.model_dump(exclude={'id'})
+    db_item = DBPowder(**data)
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
@@ -158,20 +187,11 @@ def log_usage(record: UsageRecord, db: Session = Depends(get_db)):
     logger.info(f"Logging usage: {record.powder_name}, {record.consumed_grams}g, Op: {record.operator}")
     powder = db.query(DBPowder).filter(DBPowder.name == record.powder_name).first()
     if not powder: raise HTTPException(status_code=404, detail="Powder not found")
-
     inv = db.query(DBInventory).filter(DBInventory.powder_id == powder.id).first()
     if not inv: raise HTTPException(status_code=404, detail="Inventory not found")
-
-    if inv.quantity_grams < record.consumed_grams:
-        raise HTTPException(status_code=400, detail="Insufficient material on stock")
-
+    if inv.quantity_grams < record.consumed_grams: raise HTTPException(status_code=400, detail="Insufficient material on stock")
     inv.quantity_grams -= record.consumed_grams
-    log_entry = DBUsageLog(
-        powder_id=powder.id,
-        consumed_grams=record.consumed_grams,
-        duration_sec=record.duration_sec,
-        operator=record.operator
-    )
+    log_entry = DBUsageLog(powder_id=powder.id, consumed_grams=record.consumed_grams, duration_sec=record.duration_sec, operator=record.operator)
     db.add(log_entry)
     db.commit()
     return {"status": "success", "remaining": inv.quantity_grams}
@@ -182,16 +202,14 @@ def get_summary(db: Session = Depends(get_db)):
     summary = {}
     for log in total_used:
         name = log.powder.name
-        if name not in summary: summary[name] = 0.0
-        summary[name] += log.consumed_grams
+        summary[name] = summary.get(name, 0.0) + log.consumed_grams
     return summary
 
 @app.get("/logs/", response_model=List[UsageLogSchema])
 def get_logs(limit: int = 50, db: Session = Depends(get_db)):
     logs = db.query(DBUsageLog).join(DBPowder).order_by(DBUsageLog.timestamp.desc()).limit(limit).all()
-    return [{"id": l.id, "timestamp": l.timestamp, "powder_name": l.powder.name,
-             "consumed_grams": l.consumed_grams, "operator": l.operator, "duration_sec": l.duration_sec} for l in logs]
+    return [{"id": l.id, "timestamp": l.timestamp, "powder_name": l.powder.name, "consumed_grams": l.consumed_grams, "operator": l.operator, "duration_sec": l.duration_sec} for l in logs]
 
 if __name__ == "__main__":
     print("Starting AutoPlasma Server on port 8000...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)

@@ -2,12 +2,12 @@ import sys
 import requests
 from dataclasses import dataclass
 from typing import List, Optional
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                              QTableWidget, QTableWidgetItem, QPushButton, QLabel, QLineEdit,
                              QMessageBox, QHeaderView, QGroupBox, QFormLayout, QInputDialog,
                              QComboBox, QDialog, QDialogButtonBox, QDateEdit)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QColor, QBrush
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -318,7 +318,7 @@ class AdminPanel(QMainWindow):
 
             self.log_table.setItem(i, 3, QTableWidgetItem(l.operator))
 
-            type_text = "Пополнение запасов" if l.change > 0 else "Потребление" if l.change < 0 else "Корректировка"
+            type_text = "Пополнение" if l.change > 0 else "Потребление" if l.change < 0 else "Корректировка"
             self.log_table.setItem(i, 4, QTableWidgetItem(type_text))
 
     def refresh_settings(self):
